@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+<title>브레인몹 훔치기 2D (터널 직행/이름표/E 3초 훔치기)</title>
+<style>
+  :root{ --bg:#0b0f24; --panel:#101531; --ink:#eaf0ff; --muted:#9fb1ff; --accent:#6c8bff; --green:#55f2b2; }
+  *{ box-sizing:border-box; user-select:none; -webkit-tap-highlight-color:transparent; }
+  body{ margin:0; background:linear-gradient(180deg,#0b0f24,#151b3b); color:var(--ink); font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+  #wrap{ display:grid; grid-template-columns: 320px 1fr; gap:12px; width:min(1140px,100vw); margin:14px auto; padding:0 8px; }
+  #left{ background:var(--panel); border:1px solid #213075; border-radius:14px; padding:12px; box-shadow:0 10px 30px rgba(0,0,0,.35); }
+  #left h1{ margin:0 0 8px; font-size:18px; letter-spacing:.2px; }
+  .money{ display:flex; align-items:center; justify-content:space-between; gap:10px; background:#0d1333; border:1px solid #263894; padding:8px 10px; border-radius:12px; }
+  .money b{ font-size:18px; }
+  .grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .card{ background:#0d1333; border:1px solid #263894; border-radius:12px; padding:10px; }
+  .title{ display:flex; align-items:center; justify-content:space-between; color:#a7b7ff; font-weight:800; margin-bottom:6px; }
+  .row{ display:flex; flex-wrap:wrap; gap:8px; }
+  button{ cursor:pointer; border:none; font-weight:800; border-radius:10px; padding:9px 10px; }
+  button.primary{ background:linear-gradient(180deg,#2a3cff,#2330c8); color:#fff; box-shadow:0 6px 18px rgba(90,110,255,.35); }
+  button.ghost{ background:#141a44; border:1px solid #2a3c9e; color:#b5c3ff; }
+  button:disabled{ opacity:.5; filter:grayscale(.4); cursor:not-allowed; }
+  .tiny{ font-size:11px; opacity:.75; }
+  #canvasWrap{ position:relative; border-radius:14px; overflow:hidden; background:#0a0f2b; border:1px solid #25336f; min-height:420px; }
+  canvas{ display:block; width:100%; height:100%; }
+  #hud{ position:absolute; left:10px; top:10px; display:flex; gap:8px; }
+  #hud .pill{ background:#0d1333; border:1px solid #263894; border-radius:999px; padding:6px 10px; font-size:13px; }
+  #toast{ position:absolute; left:50%; top:14px; transform:translateX(-50%); background:#172356; border:1px solid #2840a7; border-radius:10px; padding:8px 12px; font-weight:800; opacity:0; transition:.2s; white-space:nowrap; }
+  #legend{ margin-top:10px; font-size:12px; opacity:.85; line-height:1.5; }
+  #joystick{ position:absolute; left:14px; bottom:14px; width:140px; height:140px; display:none; opacity:.9; }
+  #joyBg,#joyDot{ position:absolute; border-radius:50%; }
+  #joyBg{ inset:0; background:#10163a; border:1px solid #23307a; }
+  #joyDot{ width:30px; height:30px; left:55px; top:55px; background:#6c8bff; box-shadow:0 0 22px rgba(108,139,255,.6); }
+  #btnSlap{ position:absolute; right:16px; bottom:22px; display:none; padding:14px 18px; border-radius:14px; }
+  #btnHold{ position:absolute; right:16px; bottom:84px; display:none; padding:14px 18px; border-radius:14px; }
+  #holdHint{ position:absolute; left:50%; bottom:24px; transform:translateX(-50%); font-size:13px; opacity:.9; display:none; }
+  @media (max-width: 900px){
+    #wrap{ grid-template-columns:1fr; }
+    #joystick,#btnSlap,#btnHold{ display:block; }
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="left">
+    <h1>브레인몹 훔치기 2D</h1>
+    <div class="money"><div>💰 <span id="money">0</span></div><b>x<span id="mult">1.0</span></b></div>
+    <div id="stats" class="grid card">
+      <div>🏃 속도: <b id="statSpeed">2.2</b></div>
+      <div>✋ 파워: <b id="statPower">1.0</b></div>
+      <div>🧠 보유: <b id="statBrains">0</b></div>
+      <div>🏠 집 보유: <b id="statHome">0</b></div>
+      <div>⏱ 수익/초: <b id="statRate">0.0</b></div>
+      <div>👥 봇: <b id="statBots">0</b></div>
+    </div>
+    <div class="card">
+      <div class="title"><span>상점 / 업그레이드</span><span class="tiny">Space 훔치기, <b>E 3초</b> 홀드 훔치기/급습</span></div>
+      <div class="row" style="margin-bottom:8px;">
+        <button id="buySpeed" class="primary">속도+ (₩100)</button>
+        <button id="buyPower" class="primary">파워+ (₩150)</button>
+        <button id="buyRate"  class="primary">수익+ (₩120)</button>
+        <button id="buyStun"  class="ghost">스턴폭탄 (₩200)</button>
+      </div>
+      <div class="row">
+        <button id="spawnNeutral" class="ghost">터널 추가 스폰 (₩50)</button>
+        <button id="spawnBot" class="ghost">적 봇 추가 (₩200)</button>
+        <button id="saveBtn" class="ghost">저장</button>
+        <button id="resetBtn" class="ghost">초기화</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="title"><span>환생 (Rebirth)</span><span class="tiny">초기화 + 배수 증가</span></div>
+      <div class="row">
+        <button id="rebirth" class="primary">환생하기 (₩5,000)</button>
+      </div>
+      <div class="tiny" style="margin-top:6px;">환생 시 업그레이드/소지금 초기화, 수익 배수 +0.5</div>
+    </div>
+    <div class="card">
+      <div class="title"><span>옵션</span><span class="tiny">미니맵/자동훔치기</span></div>
+      <div class="row" style="align-items:center;">
+        <label class="tiny"><input type="checkbox" id="autoSlap" checked /> 자동 훔치기</label>
+        <label class="tiny"><input type="checkbox" id="showMini" checked /> 미니맵</label>
+        <label class="tiny">봇 수: <select id="botCountSel">
+          <option>3</option><option selected>5</option><option>8</option><option>12</option>
+        </select></label>
+      </div>
+    </div>
+    <div id="legend">
+      <div>🎮 <b>조작</b> — WASD/화살표 이동, <b>Space</b> 근접 훔치기, <b>E</b> 3초 홀드로 에이전트/집 훔치기, <b>P</b> 일시정지.</div>
+      <div class="tiny">본 프로젝트는 원작 자산을 사용하지 않은 2D 팬메이드입니다.</div>
+    </div>
+  </div>
+
+  <div id="canvasWrap">
+    <canvas id="cv" width="1024" height="640"></canvas>
+    <div id="hud">
+      <div class="pill">🧠 내 보유: <b id="hudCarry">0</b></div>
+      <div class="pill">🏠 집 보유: <b id="hudHome">0</b></div>
+      <div class="pill">⚡ 폭탄: <b id="hudStun">0</b></div>
+      <div class="pill"><b id="fps">60</b> FPS</div>
+    </div>
+    <div id="holdHint">E키 3초 홀드로 훔칠 수 있어요</div>
+    <div id="toast"></div>
+    <div id="joystick">
+      <div id="joyBg"></div>
+      <div id="joyDot"></div>
+    </div>
+    <button id="btnSlap" class="primary">SLAP / 훔치기</button>
+    <button id="btnHold" class="ghost">E 홀드 (3초)</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  const wrap = document.getElementById('canvasWrap');
+  const moneyEl = document.getElementById('money');
+  const multEl = document.getElementById('mult');
+  const hudCarry = document.getElementById('hudCarry');
+  const hudHome = document.getElementById('hudHome');
+  const hudStun = document.getElementById('hudStun');
+  const fpsEl = document.getElementById('fps');
+  const statSpeed = document.getElementById('statSpeed');
+  const statPower = document.getElementById('statPower');
+  const statBrains = document.getElementById('statBrains');
+  const statHome = document.getElementById('statHome');
+  const statRate = document.getElementById('statRate');
+  const statBots = document.getElementById('statBots');
+  const toast = document.getElementById('toast');
+  const holdHint = document.getElementById('holdHint');
+
+  const ui = {
+    buySpeed: document.getElementById('buySpeed'),
+    buyPower: document.getElementById('buyPower'),
+    buyRate: document.getElementById('buyRate'),
+    buyStun: document.getElementById('buyStun'),
+    spawnNeutral: document.getElementById('spawnNeutral'),
+    spawnBot: document.getElementById('spawnBot'),
+    save: document.getElementById('saveBtn'),
+    reset: document.getElementById('resetBtn'),
+    rebirth: document.getElementById('rebirth'),
+    autoSlap: document.getElementById('autoSlap'),
+    showMini: document.getElementById('showMini'),
+    botCountSel: document.getElementById('botCountSel'),
+    btnSlap: document.getElementById('btnSlap'),
+    btnHold: document.getElementById('btnHold'),
+  };
+
+  const BRAIN_NAMES = ["픽시","모모","주비","나노","루나","네온","토코","리리","파즈","보보","준","코코","탄","미오","하나","포포","티노","로로","뽀","소라","람","푸카","미카","호로","모찌","쿠루","펄스","진","리노"];
+
+  const G = {
+    w: cv.width, h: cv.height,
+    mapW: 3400, mapH: 2400,
+    keys: {}, touchDir:{x:0,y:0},
+    paused:false, lastTs:0,
+    money: 0, incomeBase: 2, incomeLvl: 0,
+    mult: 1.0, rng:(a,b)=>Math.random()*(b-a)+a,
+    clamp:(v,a,b)=>Math.min(b,Math.max(a,v)),
+    dist:(a,b)=>Math.hypot(a.x-b.x,a.y-b.y),
+    col: { player:'#6c8bff', bot:'#ff7ad1', neutral:'#55f2b2', grid:'#151d4a', base:'#2a335f', tunnel:'#1e274f' }
+  };
+  const camera = { x:0, y:0 };
+
+  class Agent {
+    constructor(x,y,isPlayer=false){
+      this.x=x; this.y=y; this.vx=0; this.vy=0;
+      this.speed = isPlayer? 2.2 : G.rng(1.6,2.4);
+      this.power = isPlayer? 1.0 : G.rng(0.8,1.2);
+      this.brains=[]; this.isPlayer=isPlayer;
+      this.slapCd=0; this.stun=0;
+      this.name = isPlayer? 'YOU' : 'BOT';
+      this.color = isPlayer? G.col.player : G.col.bot;
+      this.wander = {tx:x,ty:y,t:0};
+      this.base = null;
+    }
+    canSlap(){ return this.slapCd<=0 && this.stun<=0; }
+    slap(){ this.slapCd = 0.6; }
+    tick(dt){
+      if(this.stun>0) this.stun-=dt;
+      if(this.slapCd>0) this.slapCd-=dt;
+      if(this.isPlayer){
+        let dx=(G.keys['ArrowRight']||G.keys['KeyD']?1:0) - (G.keys['ArrowLeft']||G.keys['KeyA']?1:0);
+        let dy=(G.keys['ArrowDown']||G.keys['KeyS']?1:0) - (G.keys['ArrowUp']||G.keys['KeyW']?1:0);
+        dx += G.touchDir.x; dy += G.touchDir.y;
+        const m = Math.hypot(dx,dy)||1;
+        this.vx = (dx/m)*this.speed*80;
+        this.vy = (dy/m)*this.speed*80;
+        if(ui.autoSlap.checked) tryAutoSlap(this);
+      } else {
+        // simple wander & deposit
+        this.wander.t -= dt;
+        if(this.brains.length>=4) { this.wander.tx=this.base.x; this.wander.ty=this.base.y; this.wander.t=1.2; }
+        if(this.wander.t<=0){
+          this.wander.t = G.rng(1.2,3.0);
+          this.wander.tx = G.clamp(this.x + G.rng(-260,260), 60, G.mapW-60);
+          this.wander.ty = G.clamp(this.y + G.rng(-260,260), 60, G.mapH-60);
+        }
+        const dx = this.wander.tx - this.x, dy = this.wander.ty - this.y;
+        const m = Math.hypot(dx,dy)||1;
+        this.vx = (dx/m)*this.speed*60;
+        this.vy = (dy/m)*this.speed*60;
+
+        // steal attempts
+        const target = nearestEnemyInRange(this, 46);
+        if(target && this.canSlap()){ this.slap(); resolveSteal(this, target); }
+      }
+      if(this.stun>0){ this.vx*=0.15; this.vy*=0.15; }
+      this.x = G.clamp(this.x + this.vx*dt, 30, G.mapW-30);
+      this.y = G.clamp(this.y + this.vy*dt, 30, G.mapH-30);
+      this.brains.forEach((b,i)=>b.followOwner(dt,i));
+    }
+    draw(){
+      const sx=this.x-camera.x, sy=this.y-camera.y, r=13;
+      ctx.fillStyle=this.color;
+      ctx.beginPath(); ctx.arc(sx,sy,r,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle='#000'; ctx.lineWidth=2; ctx.stroke();
+      ctx.fillStyle='#fff'; ctx.font='12px system-ui, sans-serif';
+      const tag = `${this.name}${this.isPlayer?'':' ('+this.brains.length+')'}`;
+      ctx.fillText(tag, sx-ctx.measureText(tag).width/2, sy-r-5);
+      if(this.slapCd>0){
+        ctx.strokeStyle='#ffd166'; ctx.lineWidth=3;
+        ctx.beginPath(); ctx.arc(sx,sy,r+4,-Math.PI/2,-Math.PI/2+(1-this.slapCd/0.6)*2*Math.PI); ctx.stroke();
+      }
+      if(this.stun>0){
+        ctx.fillStyle='#ffd166';
+        for(let i=0;i<3;i++){
+          const a=(performance.now()/250+i*2)*Math.PI/2;
+          ctx.fillRect(sx+Math.cos(a)*(r+6)-2, sy+Math.sin(a)*(r+6)-2, 4,4);
+        }
+      }
+    }
+  }
+
+  class Brain {
+    constructor(x,y,owner=null, name=null, path=null){
+      this.x=x; this.y=y; this.owner=owner;
+      this.size=10+Math.random()*4; this.wob=Math.random()*6.28;
+      this.color=['#55f2b2','#58d3ff','#ff7ad1','#ffd166','#c084fc'][Math.floor(Math.random()*5)];
+      this.name = name || '브레인로트';
+      // rarity (0.1% rainbow)
+      this.rarity = (Math.random() < 0.001) ? 'rainbow' : null;
+      // straight path movement between tunnels
+      // path = { vx, vy, target: Tunnel }
+      this.path = path;
+    }
+    tick(dt){
+      if(this.owner) return;
+      if(this.path){
+        this.x += this.path.vx*dt;
+        this.y += this.path.vy*dt;
+        // reached target tunnel?
+        if(Math.hypot(this.x - this.path.target.x, this.y - this.path.target.y) < 18){
+          // despawn on arrival
+          this._arrived = true;
+        }
+      }
+    }
+    followOwner(dt, index){
+      if(!this.owner) return;
+      const spacing=22;
+      const ang = Math.atan2(this.owner.vy,this.owner.vx)||0;
+      const tx = this.owner.x - Math.cos(ang)*spacing*(index+1);
+      const ty = this.owner.y - Math.sin(ang)*spacing*(index+1);
+      this.x += (tx-this.x)*dt*7;
+      this.y += (ty-this.y)*dt*7;
+    }
+    draw(){
+      const sx=this.x-camera.x, sy=this.y-camera.y;
+      ctx.fillStyle=this.color;
+      ctx.beginPath();
+      ctx.arc(sx,sy,this.size + Math.sin(this.wob+=0.08)*1.2,0,Math.PI*2);
+      
+      // Brainrot-like face (NamuWiki-ish)
+      // 둥근 얼굴, 큰 검은 눈 + 하이라이트, 'w' 모양 입
+      ctx.save();
+      const faceR = this.size; // base radius
+      const eyeR = faceR * 0.28;
+      const eyeDx = faceR * 0.42;
+      ctx.lineWidth = Math.max(1.8, faceR * 0.12);
+      ctx.strokeStyle = '#0e111a';
+
+      // 눈 (검은 동공 + 흰 하이라이트)
+      ctx.fillStyle = '#090b12';
+      ctx.beginPath(); ctx.arc(sx - eyeDx, sy - faceR*0.05, eyeR, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(sx + eyeDx, sy - faceR*0.05, eyeR, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      ctx.beginPath(); ctx.arc(sx - eyeDx*1.03, sy - faceR*0.18, eyeR*0.36, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(sx + eyeDx*1.03, sy - faceR*0.18, eyeR*0.36, 0, Math.PI * 2); ctx.fill();
+
+      // 입 (w 모양)
+      ctx.strokeStyle = '#0e111a';
+      ctx.lineWidth = Math.max(1.6, faceR * 0.08);
+      ctx.beginPath();
+      const mx = sx, my = sy + faceR * 0.28;
+      ctx.moveTo(mx - faceR*0.25, my);
+      ctx.quadraticCurveTo(mx - faceR*0.13, my + faceR*0.12, mx, my);
+      ctx.quadraticCurveTo(mx + faceR*0.13, my + faceR*0.12, mx + faceR*0.25, my);
+      ctx.stroke();
+      ctx.restore();
+ctx.fill();
+      
+      // Rainbow overlay (무지개): 회전 링 + 반짝임
+      if (this.rarity === 'rainbow') {
+        const ringR = this.size * 1.25;
+        const segs = 12;
+        const t = (Date.now() % 4000) / 4000;
+        for (let i = 0; i < segs; i++) {
+          const a0 = (i / segs) * Math.PI * 2 + t * Math.PI * 2;
+          const a1 = ((i + 1) / segs) * Math.PI * 2 + t * Math.PI * 2;
+          const hue = (i / segs) * 360;
+          ctx.strokeStyle = `hsl(${hue} 90% 55%)`;
+          ctx.lineWidth = Math.max(2.0, this.size * 0.22);
+          ctx.beginPath(); ctx.arc(sx, sy, ringR, a0, a1); ctx.stroke();
+        }
+        // 반짝이 포인트
+        const tw = (Date.now() % 800) / 800;
+        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        for (let i = 0; i < 4; i++) {
+          const a = tw * Math.PI * 2 + i * Math.PI / 2;
+          const px = sx + Math.cos(a) * this.size * 0.8;
+          const py = sy + Math.sin(a) * this.size * 0.8;
+          ctx.beginPath(); ctx.arc(px, py, this.size * 0.18, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+// face
+      ctx.fillStyle='#0a0a13';
+      ctx.fillRect(sx-3, sy-2, 2,2);
+      ctx.fillRect(sx+1, sy-2, 2,2);
+      ctx.fillRect(sx-1, sy+1, 2,2);
+      // name label
+      ctx.fillStyle='#eaf0ff'; ctx.font='10px system-ui,sans-serif';
+      ctx.fillText(this.name, sx-ctx.measureText(this.name).width/2, sy - (this.size+10));
+    }
+  }
+
+  class Base {
+    constructor(x,y,ownerAgent=null,label='HOME'){
+      this.x=x; this.y=y; this.owner=ownerAgent; this.label=label;
+      this.radius=54; this.stash=0;
+      this.raidProgress=0;
+    }
+  }
+
+  class Tunnel {
+    constructor(x,y,ang=0){
+      this.x=x; this.y=y; this.ang=ang;
+      this.cool=G.rng(1.5,3.0);
+      this.pair=null; // set later
+    }
+    tick(dt){
+      this.cool -= dt;
+      if(this.cool<=0 && this.pair){
+        spawnBrainFromTunnel(this, this.pair);
+        this.cool = G.rng(1.5,3.0);
+      }
+    }
+  }
+
+  const world = {
+    player: new Agent(520,520,true),
+    bots: [],
+    neutrals: [],
+    stunStock: 0,
+    tunnels: [],
+    bases: [],
+  };
+
+  // Bases
+  const playerBase = new Base(320, 360, world.player, 'YOU');
+  world.player.base = playerBase;
+
+  function botBasePos(i){
+    const margin=220;
+    const spots=[
+      {x:G.mapW-margin, y:margin},
+      {x:margin, y:G.mapH-margin},
+      {x:G.mapW-margin, y:G.mapH-margin},
+      {x:G.mapW*0.5, y:margin},
+      {x:G.mapW*0.5, y:G.mapH-margin},
+      {x:margin, y:G.mapH*0.5},
+      {x:G.mapW-margin, y:G.mapH*0.5},
+    ];
+    return spots[i % spots.length];
+  }
+
+  // Paired tunnels
+  function initTunnels(){
+    world.tunnels = [];
+    // Pair 1: 좌-우
+    const L = new Tunnel(G.mapW*0.2, G.mapH*0.45, 0);
+    const R = new Tunnel(G.mapW*0.8, G.mapH*0.45, Math.PI);
+    L.pair = R; R.pair = L;
+    // Pair 2: 상-하
+    const T = new Tunnel(G.mapW*0.65, G.mapH*0.25, Math.PI/2);
+    const B = new Tunnel(G.mapW*0.65, G.mapH*0.75, -Math.PI/2);
+    T.pair = B; B.pair = T;
+    world.tunnels.push(L,R,T,B);
+  }
+  initTunnels();
+
+  function spawnBrainFromTunnel(from, to){
+    const speed = 90; // straight speed
+    const ang = Math.atan2(to.y-from.y, to.x-from.x);
+    const vx = Math.cos(ang)*speed;
+    const vy = Math.sin(ang)*speed;
+    const b = new Brain(from.x, from.y, null, null, {vx,vy,target:to});
+    world.neutrals.push(b);
+  }
+
+  function spawnBot(){
+    const idx = world.bots.length;
+    const pos = botBasePos(idx);
+    const a = new Agent(pos.x+G.rng(-60,60), pos.y+G.rng(-60,60), false);
+    const bbase = new Base(pos.x, pos.y, a, 'BOT');
+    a.base = bbase;
+    const starter = Math.floor(G.rng(1,4));
+    for(let i=0;i<starter;i++){ const b=new Brain(a.x,a.y,a); a.brains.push(b); }
+    world.bots.push(a);
+    world.bases.push(bbase);
+  }
+
+  function initWorld(botCount=5){
+    world.bots.length=0; world.neutrals.length=0; world.bases=[playerBase]; playerBase.stash=0;
+    for(let i=0;i<botCount;i++) spawnBot();
+  }
+  initWorld(5);
+
+  // camera
+  function updateCamera(){
+    camera.x += ((world.player.x - G.w/2) - camera.x)*0.08;
+    camera.y += ((world.player.y - G.h/2) - camera.y)*0.08;
+    camera.x = G.clamp(camera.x, 0, G.mapW-G.w);
+    camera.y = G.clamp(camera.y, 0, G.mapH-G.h);
+  }
+
+  // helpers
+  function inBase(agent, base){ return G.dist(agent, base)<base.radius; }
+
+  function depositIfInBase(agent){
+    if(agent.base && inBase(agent, agent.base) && agent.brains.length>0){
+      const n = agent.brains.length;
+      agent.base.stash += n;
+      agent.brains.length = 0;
+      if(agent.isPlayer) showToast(`🏠 집에 ${n} 저장!`);
+    }
+  }
+
+  // economy
+  let incomeAcc=0;
+  function earn(dt){
+    const carriedRate = 0.2 * world.player.brains.length;
+    const homeRate = (G.incomeBase + G.incomeLvl*0.7) * playerBase.stash;
+    const rate = (carriedRate + homeRate) * G.mult;
+    incomeAcc += rate*dt;
+    if(incomeAcc>=1){
+      const k = Math.floor(incomeAcc);
+      G.money += k; incomeAcc-=k;
+    }
+    moneyEl.textContent = Math.floor(G.money).toLocaleString();
+    multEl.textContent = G.mult.toFixed(1);
+    statRate.textContent = rate.toFixed(1);
+  }
+
+  function nearestEnemyInRange(agent, range=48){
+    let best=null, bestD=1e9;
+    const list = agent.isPlayer ? world.bots : [world.player];
+    for(const t of list){
+      const d = G.dist(agent,t);
+      if(d<range && d<bestD){ best=t; bestD=d; }
+    }
+    return best;
+  }
+
+  function resolveSteal(attacker, defender){
+    if(attacker.power >= defender.power*0.9 || Math.random()<0.4){
+      if(defender.brains.length){
+        const brain = defender.brains.pop();
+        brain.owner = attacker;
+        attacker.brains.unshift(brain);
+        if(attacker.isPlayer) showToast('✅ 훔치기 성공!');
+        if(defender.isPlayer) showToast('⚠️ 봇에게 빼앗김!');
+        return true;
+      }
+    } else {
+      defender.stun = Math.max(defender.stun, 0.45);
+      if(attacker.isPlayer) showToast('✨ 상대 기절!');
+    }
+    return false;
+  }
+
+  function tryAutoSlap(agent){
+    const t = nearestEnemyInRange(agent, 48);
+    if(t && agent.canSlap()){ agent.slap(); resolveSteal(agent,t); }
+  }
+
+  function playerTrySlap(){
+    const p=world.player;
+    if(!p.canSlap()) return;
+    p.slap();
+    const enemy = nearestEnemyInRange(p,48);
+    if(enemy){ resolveSteal(p,enemy); }
+    else if(world.stunStock>0){
+      world.stunStock--;
+      for(const b of world.bots){ if(G.dist(p,b)<120) b.stun=1.0; }
+      showToast('💥 스턴 폭탄!');
+    }
+  }
+
+  function checkPickups(){
+    // player vs straight-moving neutrals (touch pickup keeps as is)
+    for(let i=world.neutrals.length-1;i>=0;i--){
+      const b = world.neutrals[i];
+      if(G.dist(world.player,b)<22){
+        b.owner=world.player; world.player.brains.push(b);
+        world.neutrals.splice(i,1);
+        showToast('🧠 브레인몹 획득!');
+      }
+    }
+    // bots pick neutrals
+    for(const bot of world.bots){
+      for(let i=world.neutrals.length-1;i>=0;i--){
+        const b = world.neutrals[i];
+        if(G.dist(bot,b)<20){
+          b.owner=bot; bot.brains.push(b);
+          world.neutrals.splice(i,1);
+        }
+      }
+    }
+  }
+
+  // Hold-to-steal (3s) for agent or base
+  const hold = { active:false, type:null, target:null, t:0, required:3 };
+  function handleHold(dt){
+    // choose target: prefer base if inside, else nearest enemy agent in close range
+    let baseTarget=null;
+    for(const b of world.bases){
+      if(b!==playerBase && inBase(world.player,b)){ baseTarget=b; break; }
+    }
+    let agentTarget = nearestEnemyInRange(world.player, 54);
+
+    let desiredType=null, desiredTarget=null, hintText='';
+    if(baseTarget){ desiredType='base'; desiredTarget=baseTarget; hintText='E키 3초 홀드: 집 급습'; }
+    else if(agentTarget){ desiredType='agent'; desiredTarget=agentTarget; hintText='E키 3초 홀드: 훔치기'; }
+
+    if(desiredType){
+      holdHint.style.display='block';
+      holdHint.textContent = hintText;
+    } else {
+      holdHint.style.display='none';
+    }
+
+    const holding = G.keys['KeyE'] || mobileHold;
+    if(holding && desiredType){
+      if(!hold.active || hold.target!==desiredTarget || hold.type!==desiredType){
+        hold.active=true; hold.type=desiredType; hold.target=desiredTarget; hold.t=0;
+      }
+      hold.t += dt;
+      // visuals
+      if(hold.type==='base'){
+        hold.target.raidProgress = hold.t/hold.required;
+      }
+      if(hold.t>=hold.required){
+        if(hold.type==='base') { stealFromBase(world.player, hold.target); }
+        else if(hold.type==='agent') { resolveSteal(world.player, hold.target); }
+        // reset
+        if(hold.type==='base') hold.target.raidProgress=0;
+        hold.active=false; hold.t=0; hold.target=null; hold.type=null;
+      }
+    } else {
+      if(hold.active){
+        if(hold.type==='base' && hold.target) hold.target.raidProgress=0;
+        hold.active=false; hold.t=0; hold.target=null; hold.type=null;
+      }
+    }
+  }
+
+  function stealFromBase(raider, base){
+    if(base.stash<=0) { showToast('텅 비었어요'); return; }
+    const take = Math.max(1, Math.min(5, Math.ceil(base.stash*0.3)));
+    base.stash -= take;
+    for(let i=0;i<take;i++){ const b=new Brain(base.x,base.y,raider); raider.brains.push(b); }
+    if(raider.isPlayer) showToast(`🚨 집에서 ${take} 훔침!`);
+    if(base.owner && base.owner.isPlayer) showToast('⚠️ 누군가 집을 급습!');
+  }
+
+  // UI actions
+  ui.buySpeed.onclick = ()=>{ if(G.money>=100){ G.money-=100; world.player.speed+=0.25; statSpeed.textContent=world.player.speed.toFixed(2);} };
+  ui.buyPower.onclick = ()=>{ if(G.money>=150){ G.money-=150; world.player.power+=0.2; statPower.textContent=world.player.power.toFixed(1);} };
+  ui.buyRate.onclick  = ()=>{ if(G.money>=120){ G.money-=120; G.incomeLvl++; } };
+  ui.buyStun.onclick  = ()=>{ if(G.money>=200){ G.money-=200; world.stunStock++; showToast('🧨 스턴폭탄 +1'); } };
+  ui.spawnNeutral.onclick = ()=>{ if(G.money>=50){ G.money-=50; for(const t of world.tunnels){ spawnBrainFromTunnel(t, t.pair); } showToast('🧠 터널 추가 스폰'); } };
+  ui.spawnBot.onclick = ()=>{ if(G.money>=200){ G.money-=200; spawnBot(); showToast('🤖 적 봇 추가'); } };
+  ui.rebirth.onclick = ()=>{
+    if(G.money>=5000){
+      G.money=0; G.incomeLvl=0;
+      world.player.brains.forEach(b=>{ b.owner=null; world.neutrals.push(b); });
+      world.player.brains.length=0;
+      world.player.speed=2.2; world.player.power=1.0;
+      playerBase.stash=0;
+      G.mult += 0.5;
+      showToast('🌀 환생! 배수 +0.5');
+    } else showToast('₩5,000 필요');
+  };
+  ui.botCountSel.onchange = ()=>{ initWorld(parseInt(ui.botCountSel.value,10)); };
+
+  // Save / Load
+  function save(){
+    const data = {
+      money:G.money, mult:G.mult, incomeLvl:G.incomeLvl,
+      speed:world.player.speed, power:world.player.power,
+      carry:world.player.brains.length, stun:world.stunStock,
+      home:playerBase.stash, bots:world.bots.length
+    };
+    localStorage.setItem('brainrot2d_pairs', JSON.stringify(data));
+  }
+  function load(){
+    const raw = localStorage.getItem('brainrot2d_pairs');
+    if(!raw) return;
+    try {
+      const d = JSON.parse(raw);
+      G.money=d.money||0; G.mult=d.mult||1; G.incomeLvl=d.incomeLvl||0;
+      world.player.speed=d.speed||2.2; world.player.power=d.power||1.0;
+      world.stunStock=d.stun||0; playerBase.stash=d.home||0;
+      initWorld(d.bots||5);
+      for(let i=0;i<(d.carry||0);i++){ const b=new Brain(world.player.x,world.player.y,world.player); world.player.brains.push(b); }
+      showToast('📂 저장 불러옴');
+    } catch(e){}
+  }
+  ui.save.onclick = ()=>{ save(); showToast('💾 저장 완료'); };
+  ui.reset.onclick = ()=>{ localStorage.removeItem('brainrot2d_pairs'); location.reload(); };
+  load();
+
+  // Input
+  window.addEventListener('keydown',(e)=>{
+    if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyW','KeyA','KeyS','KeyD','Space','KeyP','KeyE'].includes(e.code)) e.preventDefault();
+    G.keys[e.code]=true;
+    if(e.code==='Space') playerTrySlap();
+    if(e.code==='KeyP') G.paused = !G.paused;
+  });
+  window.addEventListener('keyup',(e)=>{ G.keys[e.code]=false; });
+
+  // Mobile joystick & hold
+  const joy = document.getElementById('joystick'), joyBg=document.getElementById('joyBg'), joyDot=document.getElementById('joyDot');
+  let joyActive=false, mobileHold=false;
+  function joySet(e){
+    const rect = joy.getBoundingClientRect();
+    const x=(e.touches?e.touches[0].clientX:e.clientX)-rect.left;
+    const y=(e.touches?e.touches[0].clientY:e.clientY)-rect.top;
+    const cx=rect.width/2, cy=rect.height/2;
+    const dx=x-cx, dy=y-cy; const dist=Math.hypot(dx,dy); const max=rect.width/2-15;
+    const scale=Math.min(1,dist/max); const nx=(dx/(dist||1))*scale, ny=(dy/(dist||1))*scale;
+    G.touchDir.x=nx; G.touchDir.y=ny;
+    joyDot.style.left=(cx+nx*max-15)+'px'; joyDot.style.top=(cy+ny*max-15)+'px';
+  }
+  function joyReset(){ G.touchDir.x=0; G.touchDir.y=0; joyDot.style.left='55px'; joyDot.style.top='55px'; }
+  joy.addEventListener('touchstart',(e)=>{ joyActive=true; joySet(e); }, {passive:false});
+  joy.addEventListener('touchmove',(e)=>{ if(joyActive) joySet(e); }, {passive:false});
+  joy.addEventListener('touchend',()=>{ joyActive=false; joyReset(); }, {passive:false});
+  ui.btnSlap.addEventListener('click', playerTrySlap);
+  ui.btnHold.addEventListener('touchstart', ()=>{ mobileHold=true; }, {passive:true});
+  ui.btnHold.addEventListener('touchend',   ()=>{ mobileHold=false; }, {passive:true});
+  ui.btnHold.addEventListener('mousedown', ()=>{ mobileHold=true; });
+  ui.btnHold.addEventListener('mouseup',   ()=>{ mobileHold=false; });
+
+  // Resize
+  function fit(){
+    const r = wrap.getBoundingClientRect();
+    const w = Math.max(540, r.width);
+    const h = Math.max(420, Math.min(760, r.width*0.58));
+    cv.width=w; cv.height=h; G.w=w; G.h=h;
+  }
+  window.addEventListener('resize', fit); fit();
+
+  // Toast
+  let toastTimer=null;
+  function showToast(msg){
+    toast.textContent=msg; toast.style.opacity=1; toast.style.transform='translateX(-50%) translateY(0)';
+    clearTimeout(toastTimer);
+    toastTimer=setTimeout(()=>{ toast.style.opacity=0; toast.style.transform='translateX(-50%) translateY(-8px)'; }, 1000);
+  }
+
+  // Loop
+  let fpsFrames=0, fpsTime=0;
+  function loop(ts){
+    const dt = Math.min(0.033, (ts-G.lastTs)/1000 || 0.016); G.lastTs=ts;
+    if(!G.paused){
+      world.player.tick(dt);
+      for(const b of world.bots) b.tick(dt);
+      for(const t of world.tunnels) t.tick(dt);
+      // straight-moving neutrals
+      for(let i=world.neutrals.length-1;i>=0;i--){
+        const nb=world.neutrals[i];
+        nb.tick(dt);
+        if(nb._arrived){ world.neutrals.splice(i,1); }
+      }
+      // bot vs bot occasional
+      if(Math.random()<0.004 && world.bots.length>=2){
+        const a=world.bots[Math.floor(Math.random()*world.bots.length)];
+        const b=world.bots[Math.floor(Math.random()*world.bots.length)];
+        if(a!==b && G.dist(a,b)<60 && a.canSlap()){ a.slap(); resolveSteal(a,b); }
+      }
+      checkPickups();
+      depositIfInBase(world.player);
+      for(const b of world.bots) depositIfInBase(b);
+      handleHold(dt);
+      earn(dt);
+    }
+    updateCamera();
+    draw();
+    fpsFrames++; fpsTime+=dt;
+    if(fpsTime>0.5){ fpsEl.textContent = Math.round(fpsFrames/fpsTime); fpsFrames=0; fpsTime=0; }
+    requestAnimationFrame(loop);
+  }
+
+  function drawGrid(){
+    ctx.fillStyle='#0a0f2b'; ctx.fillRect(0,0,G.w,G.h);
+    ctx.save(); ctx.translate(-camera.x%40, -camera.y%40);
+    ctx.strokeStyle=G.col.grid; ctx.lineWidth=1;
+    for(let x=-40;x<G.w+40;x+=40){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,G.h+40); ctx.stroke(); }
+    for(let y=-40;y<G.h+40;y+=40){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(G.w+40,y); ctx.stroke(); }
+    ctx.restore();
+  }
+
+  function drawHouse(base){
+    const sx=base.x-camera.x, sy=base.y-camera.y;
+    ctx.fillStyle='rgba(42,51,95,0.6)';
+    ctx.beginPath(); ctx.arc(sx,sy,base.radius,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='#2e3e9e'; ctx.lineWidth=2; ctx.stroke();
+    ctx.fillStyle='#cfe1ff';
+    ctx.beginPath();
+    ctx.moveTo(sx-14, sy+10);
+    ctx.lineTo(sx-14, sy-2);
+    ctx.lineTo(sx, sy-14);
+    ctx.lineTo(sx+14, sy-2);
+    ctx.lineTo(sx+14, sy+10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle='#0d1333'; ctx.fillRect(sx-4, sy, 8, 12);
+    const label = `${base.label}🏠 ${base.stash}`;
+    ctx.fillStyle='#fff'; ctx.font='12px system-ui,sans-serif';
+    ctx.fillText(label, sx-ctx.measureText(label).width/2, sy+base.radius+14);
+    if(base.raidProgress>0){
+      ctx.strokeStyle='#ffd166'; ctx.lineWidth=4;
+      ctx.beginPath();
+      ctx.arc(sx,sy,base.radius+6, -Math.PI/2, -Math.PI/2 + base.raidProgress*2*Math.PI);
+      ctx.stroke();
+    }
+  }
+
+  function drawTunnel(t){
+    const sx=t.x-camera.x, sy=t.y-camera.y;
+    ctx.fillStyle=G.col.tunnel;
+    ctx.fillRect(sx-30, sy-14, 60, 28);
+    ctx.fillStyle='#0a0f2b';
+    ctx.beginPath();
+    ctx.arc(sx, sy, 16, Math.PI, 0);
+    ctx.fill();
+    // arrow toward pair
+    if(t.pair){
+      const ang = Math.atan2(t.pair.y-t.y, t.pair.x-t.x);
+      ctx.fillStyle='#9fb1ff';
+      const ax = sx + Math.cos(ang)*18, ay = sy + Math.sin(ang)*18;
+      ctx.beginPath();
+      ctx.moveTo(ax,ay);
+      ctx.lineTo(ax-5*Math.cos(ang-Math.PI/6), ay-5*Math.sin(ang-Math.PI/6));
+      ctx.lineTo(ax-5*Math.cos(ang+Math.PI/6), ay-5*Math.sin(ang+Math.PI/6));
+      ctx.closePath(); ctx.fill();
+    }
+  }
+
+  function drawMinimap(){
+    if(!ui.showMini.checked) return;
+    const mw=160, mh=110, pad=10;
+    const x=G.w - mw - pad, y=pad;
+    ctx.globalAlpha=0.85;
+    ctx.fillStyle='#0d1333'; ctx.fillRect(x,y,mw,mh);
+    ctx.strokeStyle='#2a3c9e'; ctx.strokeRect(x,y,mw,mh);
+    ctx.globalAlpha=1.0;
+    const sx = mw/G.mapW, sy = mh/G.mapH;
+    ctx.fillStyle='#9fb1ff';
+    for(const t of world.tunnels){ ctx.fillRect(x + t.x*sx -2, y + t.y*sy -2, 4,4); }
+    ctx.fillStyle='#cfe1ff';
+    for(const b of world.bases){ ctx.fillRect(x + b.x*sx -3, y + b.y*sy -3, 6,6); }
+    ctx.fillStyle='#55f2b2';
+    for(const nb of world.neutrals){ ctx.fillRect(x + nb.x*sx, y + nb.y*sy, 2,2); }
+    ctx.fillStyle='#ff7ad1';
+    for(const a of world.bots){ ctx.fillRect(x + a.x*sx, y + a.y*sy, 3,3); }
+    ctx.fillStyle='#6c8bff'; ctx.fillRect(x + world.player.x*sx -2, y + world.player.y*sy -2, 4,4);
+  }
+
+  function drawHoldRingOnAgent(agent, progress){
+    const sx=agent.x-camera.x, sy=agent.y-camera.y;
+    ctx.strokeStyle='#ffd166'; ctx.lineWidth=4;
+    ctx.beginPath();
+    ctx.arc(sx,sy,22, -Math.PI/2, -Math.PI/2 + progress*2*Math.PI);
+    ctx.stroke();
+  }
+
+  function draw(){
+    drawGrid();
+    for(const t of world.tunnels) drawTunnel(t);
+    for(const b of world.bases) drawHouse(b);
+    for(const nb of world.neutrals) nb.draw();
+    for(const a of world.bots) a.draw();
+    world.player.draw();
+
+    // hold ring for agent target
+    if(hold.active && hold.type==='agent' && hold.target){
+      drawHoldRingOnAgent(hold.target, hold.t/hold.required);
+    }
+
+    ctx.strokeStyle='#223065'; ctx.lineWidth=2; ctx.strokeRect(0,0,G.w,G.h);
+
+    // HUD
+    hudCarry.textContent = world.player.brains.length;
+    hudHome.textContent = playerBase.stash;
+    hudStun.textContent = world.stunStock;
+    statBrains.textContent = world.player.brains.length;
+    statHome.textContent = playerBase.stash;
+    statSpeed.textContent = world.player.speed.toFixed(2);
+    statPower.textContent = world.player.power.toFixed(1);
+    statBots.textContent = world.bots.length;
+
+    drawMinimap();
+  }
+
+  // First hint
+  setTimeout(()=>showToast('터널에서 나온 🧠이 일자로 이동합니다. 집에 저장하고, E 3초로 훔쳐보세요!'), 800);
+
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
